@@ -1,3 +1,7 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 class BaseCNN(nn.Module):
     def __init__(self, num_classes, fc_hidden_size, batchnorm=True):
         super(BaseCNN, self).__init__()

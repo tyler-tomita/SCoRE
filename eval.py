@@ -1,3 +1,20 @@
+import torch
+import torch.nn as nn
+from torch import optim
+import torch.nn.functional as F
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+from torch.utils.data import Subset
+from torchvision import datasets
+from torchvision.transforms import ToTensor, Compose
+from IPython import display
+from time import sleep
+import copy
+import time
+import math
+from scipy import ndimage as ndi
+from PIL import Image
+
 def eval_score(score_model, mem_model, input_tensor, target_tensor, task_label_tensor, num_tasks, use_compressed=False, k=1):
   n = input_tensor.shape[0]
   preds = torch.zeros((n, 2))

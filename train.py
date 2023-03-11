@@ -1,4 +1,21 @@
-def trainSCORE(score_model, mem_model, data_loader, optimizer, score_hyper, mem_hyper, freeze_experts=True, use_compressed=False, plot_perf=True):
+import torch
+import torch.nn as nn
+from torch import optim
+import torch.nn.functional as F
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+from torch.utils.data import Subset
+from torchvision import datasets
+from torchvision.transforms import ToTensor, Compose
+from IPython import display
+from time import sleep
+import copy
+import time
+import math
+from scipy import ndimage as ndi
+from PIL import Image
+
+def trainSCORE(score_model, mem_model, dataloader, optimizer, score_hyper, mem_hyper, freeze_experts=True, use_compressed=False, plot_perf=True):
 
     learning_rate_experts = score_hyper['learning_rate_experts']
     learning_rate_ensembler = score_hyper['learning_rate_ensembler']
@@ -29,9 +46,7 @@ def trainSCORE(score_model, mem_model, data_loader, optimizer, score_hyper, mem_
 
     replay_old_task = False
 
-    n_train = inputs.shape[0]
-
-    print_every = math.floor(n_train/10)
+    n_train = len(dataloader.dataset)
 
     # train_mode is one of 'expert', 'ensembler', or 'context_recognizer'
     # start in 'expert' mode
@@ -68,25 +83,13 @@ def trainSCORE(score_model, mem_model, data_loader, optimizer, score_hyper, mem_
     train_loss = torch.zeros(n_train)
     train_acc = torch.zeros(n_train)
 
-    chance_acc = (labels == torch.mode(labels, dim=0)[0]).float().mean()
+    # compute chance accuracy and initialize recent_acc and best_acc with chance
+    all_labels =torch.tensor([])
+    for _, labels in dataloader:
+        all_labels = torch.cat([all_labels, labels])
+    chance_acc = (all_labels.mode()[0] == all_labels).float().mean()
     recent_acc = (torch.rand(acc_window).to(device) < chance_acc).float()
     best_acc = chance_acc
-
-    # if plot_perf:
-    #         plt.axis([-1, n_train+1, 0, 1.05])
-    #         plt.axvline(x=n_train/4, linestyle='--', color='gray')
-    #         plt.axvline(x=n_train/4*2, linestyle='--', color='gray')
-    #         plt.axvline(x=n_train/4*3, linestyle='--', color='gray')
-    #         # plt.xticks(list(range(num_epochs+1)))
-    #         plt.xticks([int(n_train/8)*ii for ii in range(9)], fontsize=20)
-    #         plt.xlabel('Training Example', fontsize=20)
-    #         plt.ylabel('Accuracy', fontsize=20)
-    #         plt.yticks([0.0, 0.25, 0.5, 0.75, 1.0], fontsize=20)
-    #         plt.gcf().set_size_inches(15, 5)
-    #         # plt.title(f'Trial {trial}\nIteration {0}/{n_train}', fontsize=20)
-    #         display.display(plt.gcf())
-    #         display.clear_output(wait=True)
-
 
     i = 0
 
@@ -108,7 +111,7 @@ def trainSCORE(score_model, mem_model, data_loader, optimizer, score_hyper, mem_
                 # train the expert
                 train_loss[i], train_acc[i] = trainExpert(score_model, inputs[ii:(ii+1)], labels[ii], optimizer_score, criterion)
 
-                # compute mean of the past `window_size` trials
+                # compute mean of the past `acc_window` trials
                 recent_acc[:-1] = recent_acc[1:].clone()
                 recent_acc[-1] = train_acc[i]
                 mean_acc = recent_acc.mean()
@@ -185,7 +188,7 @@ def trainSCORE(score_model, mem_model, data_loader, optimizer, score_hyper, mem_
             # try tuning the ensembler network
             elif train_mode == 'ensembler':
 
-                train_loss, train_acc = trainEnsembler(score_model, train_model,
+                train_loss[i], train_acc[i] = trainEnsembler(score_model, train_model,
                                                        inputs, labels,
                                                        criterion, score_optimizer)
 
@@ -193,17 +196,13 @@ def trainSCORE(score_model, mem_model, data_loader, optimizer, score_hyper, mem_
                 # if replay_old_task:
                 #     replayTask()
 
-                # compute mean of the past `window_size` trials
+                # compute mean of the past `acc_window` trials
                 recent_acc[:-1] = recent_acc[1:].clone()
                 recent_acc[-1] = train_acc[i]
                 mean_acc = recent_acc.mean()
 
                 if within_mode_idx == (epochs_ensemble_check-1):
-                    perf_slope = torch.mean(train_acc[(i-acc_window):i]) - torch.mean(train_acc[:acc_window])
-                    perf = torch.mean(train_acc[(i-acc_window):i])
-                    # print('acc slope: ' + str(perf_slope))
-                    # print('acc: ' + str(perf))
-                    if perf < perf_check:
+                    if mean_acc < perf_check:
                         # print('ensemble performance is insufficient: recruit new expert at iteration {}'.format(str(i)))
                         # time.sleep(1.)
                         train_mode = 'expert'
@@ -239,7 +238,6 @@ def trainSCORE(score_model, mem_model, data_loader, optimizer, score_hyper, mem_
                         # time.sleep(1.)
                     within_task_idx += 1
                 elif within_mode_idx > (epochs_ensemble_check - 1):
-
                     if (best_acc - mean_acc > new_task_threshold) and (best_acc > check_new_task_acc):
 
                         # we think a new task has been encountered
@@ -248,7 +246,9 @@ def trainSCORE(score_model, mem_model, data_loader, optimizer, score_hyper, mem_
                         train_mode = 'context_recognizer'
 
                         # initialize RL reward for each task
-                        Q_overall = initializeEnsemblerRewards(score_model, mem_model, inputs[ii], use_compressed, k, learning_rate_context_td, context_reward_weight)
+                        Q_task, Q_context, Q_overall = initializeEnsemblerRewards(score_model,
+                            mem_model, inputs[ii], use_compressed, k,
+                            learning_rate_context_td, context_reward_weight)
 
                         # update tracked variables
                         within_mode_idx = 0
@@ -270,11 +270,7 @@ def trainSCORE(score_model, mem_model, data_loader, optimizer, score_hyper, mem_
             # store memories
             mem_model.add_memory(inputs[ii], labels[ii])
 
-            idx_low = i-acc_window
-            if idx_low < 0:
-                idx_low = 0
-            idx_high = i
-            perf = torch.mean(train_acc[idx_low:idx_high])
+            perf = mean_acc
 
             if plot_perf:
                 # plt.axis([0, n_train+1, 0, 1.])
