@@ -1,3 +1,10 @@
+import torch
+import torch.nn as nn
+import numpy as np
+import math
+import time
+from matplotlib import pyplot as plt
+
 def asMinutes(s):
     m = math.floor(s / 60)
     s -= m * 60
@@ -41,3 +48,21 @@ def computeRunningAverage(accuracy_array, window_size):
         idx_high = i+1
         ave_acc[i] = accuracy_array[idx_low:idx_high].mean()
     return ave_acc
+
+def confusionMatrix(labels, predictions, num_classes, normalize=False):
+    # rows are predictions; columns are ground truth labels
+    cm = torch.zeros((num_classes, num_classes))
+
+    for i in range(num_classes):
+        for j in range(num_classes):
+            cm[i, j] = ((predictions == i) & (labels == j)).sum()
+
+    if normalize:
+        cm[:, :] = cm[:, :]/predictions.shape[0]
+
+    return cm
+
+def init_weights(m):
+    if isinstance(m, nn.Linear):
+        torch.nn.init.xavier_uniform_(m.weight)
+        m.bias.data.fill_(0.01)

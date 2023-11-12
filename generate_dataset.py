@@ -2,23 +2,12 @@ from __future__ import unicode_literals, print_function, division
 import torch
 import cv2
 from io import open
-import unicodedata
-import string
-import re
-import random
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-import matplotlib
-import time
-import math
-from scipy import ndimage as ndi
 import copy
-# from models import *
-# from train import *
-# from eval import *
-# from utils import *
-from GaborFeatureExtractor import GaborFeatureExtractor
+import pickle
+from torchvision.transforms import Resize, ToTensor
+from PIL import Image
 
 def gabor_patch(theta, lambd, ksize, badvals=np.nan):
     # theta is in radians
@@ -394,7 +383,10 @@ def generate_dataset(root_dir):
     my_cmap = copy.copy(plt.cm.get_cmap('gray')) # get a copy of the gray color map
     my_cmap.set_bad(alpha=0) # set how the colormap handles 'bad' values
 
-    dataset_size = {'train':192, 'val':192}
+    dataset_size = {'train':int(512), 'val':int(512)}
+
+    border_width = 10
+
     for phase in ['train', 'val']:
         all_images = []
         all_features = []
@@ -403,62 +395,167 @@ def generate_dataset(root_dir):
 
         # Task 1
         images, stim_features, targets = generate_stimuli(int(dataset_size[phase]/4))
+        images = np.stack((images, ) * 3, axis=-1)
         background_pixels = np.isnan(images)
         images[background_pixels] = np.nan
-        all_images.append(images)
+        pixel_min = images[~background_pixels].min()
+        pixel_max = images[~background_pixels].max()
+        pixel_mean = images[~background_pixels].mean()
+
+        # fill background with mean pixel value
+        images[np.isnan(images)] = pixel_mean
+
+        # normalize to integers in [0, 255]
+        images = (images - pixel_min)/(pixel_max - pixel_min)
+        images = (images*255).astype(np.uint8)
+
+        # add colored border
+        border_color = np.array([255, 0, 0])
+        images_plus_border = np.zeros((images.shape[0], images.shape[1]+2*border_width, images.shape[2]+2*border_width, images.shape[3]), dtype=np.uint8)
+        for channel in range(3):
+            images_plus_border[:, :, :, channel] = border_color[channel]
+        images_plus_border[:, border_width:-border_width, border_width:-border_width, :] = images
+        all_images.append(images_plus_border)
         all_features.append(stim_features)
         all_targets.append(targets[:, 0, np.newaxis])
-        all_task_ids.append(np.zeros(dataset_size[phase]))
+        all_task_ids.append(np.zeros(dataset_size[phase], dtype=np.short))
 
         # Task 2
         images, stim_features, targets = generate_stimuli(int(dataset_size[phase]/4))
+        images = np.stack((images, ) * 3, axis=-1)
         background_pixels = np.isnan(images)
         images[background_pixels] = np.nan
-        all_images.append(images)
+        pixel_min = images[~background_pixels].min()
+        pixel_max = images[~background_pixels].max()
+        pixel_mean = images[~background_pixels].mean()
+
+        # fill background with mean pixel value
+        images[np.isnan(images)] = pixel_mean
+
+        # normalize to integers in [0, 255]
+        images = (images - pixel_min)/(pixel_max - pixel_min)
+        images = (images*255).astype(np.uint8)
+
+        # add colored border
+        border_color = np.array([0, 255, 0])
+        images_plus_border = np.zeros((images.shape[0], images.shape[1]+2*border_width, images.shape[2]+2*border_width, images.shape[3]), dtype=np.uint8)
+        for channel in range(3):
+            images_plus_border[:, :, :, channel] = border_color[channel]
+        images_plus_border[:, border_width:-border_width, border_width:-border_width, :] = images
+        all_images.append(images_plus_border)
         all_features.append(stim_features)
         all_targets.append(targets[:, 1, np.newaxis])
-        all_task_ids.append(np.zeros(dataset_size[phase])+1)
+        all_task_ids.append(np.zeros(dataset_size[phase], dtype=np.short)+1)
 
         # Task 3
         images, stim_features, targets = generate_stimuli_task_3(int(dataset_size[phase]))
+        images = np.stack((images, ) * 3, axis=-1)
         background_pixels = np.isnan(images)
         images[background_pixels] = np.nan
-        all_images.append(images)
+        pixel_min = images[~background_pixels].min()
+        pixel_max = images[~background_pixels].max()
+        pixel_mean = images[~background_pixels].mean()
+
+        # fill background with mean pixel value
+        images[np.isnan(images)] = pixel_mean
+
+        # normalize to integers in [0, 255]
+        images = (images - pixel_min)/(pixel_max - pixel_min)
+        images = (images*255).astype(np.uint8)
+
+        # add colored border
+        border_color = np.array([0, 0, 255])
+        images_plus_border = np.zeros((images.shape[0], images.shape[1]+2*border_width, images.shape[2]+2*border_width, images.shape[3]), dtype=np.uint8)
+        for channel in range(3):
+            images_plus_border[:, :, :, channel] = border_color[channel]
+        images_plus_border[:, border_width:-border_width, border_width:-border_width, :] = images
+        all_images.append(images_plus_border)
         all_features.append(stim_features)
         all_targets.append(targets)
-        all_task_ids.append(np.zeros(dataset_size[phase])+2)
+        all_task_ids.append(np.zeros(dataset_size[phase], dtype=np.short)+2)
 
         # Task 4
         images, stim_features, targets = generate_stimuli_task_4(int(dataset_size[phase]))
+        images = np.stack((images, ) * 3, axis=-1)
         background_pixels = np.isnan(images)
         images[background_pixels] = np.nan
-        all_images.append(images)
+        pixel_min = images[~background_pixels].min()
+        pixel_max = images[~background_pixels].max()
+        pixel_mean = images[~background_pixels].mean()
+
+        # fill background with mean pixel value
+        images[np.isnan(images)] = pixel_mean
+
+        # normalize to integers in [0, 255]
+        images = (images - pixel_min)/(pixel_max - pixel_min)
+        images = (images*255).astype(np.uint8)
+
+        # add colored border
+        border_color = np.array([255, 255, 0])
+        images_plus_border = np.zeros((images.shape[0], images.shape[1]+2*border_width, images.shape[2]+2*border_width, images.shape[3]), dtype=np.uint8)
+        for channel in range(3):
+            images_plus_border[:, :, :, channel] = border_color[channel]
+        images_plus_border[:, border_width:-border_width, border_width:-border_width, :] = images
+        all_images.append(images_plus_border)
         all_features.append(stim_features)
         all_targets.append(targets)
-        all_task_ids.append(np.zeros(dataset_size[phase])+3)
+        all_task_ids.append(np.zeros(dataset_size[phase], dtype=np.short)+3)
 
         all_images = np.concatenate(all_images, axis=0)
+
+        # not_nan = ~np.isnan(all_images)
+        # pixel_min = all_images[not_nan].min()
+        # pixel_max = all_images[not_nan].max()
+        # pixel_mean = all_images[not_nan].mean()
+
+        # # fill background with mean pixel value
+        # all_images[np.isnan(all_images)] = pixel_mean
+
+        # # normalize to integers in [0, 255]
+        # all_images = (all_images - pixel_min)/(pixel_max - pixel_min)
+        # all_images = (all_images*255).astype(np.uint8)
+
+        # expand dims to (n, h, w, 3)
+        # all_images = np.tile(all_images[:, :, :, np.newaxis], (1, 1, 1, 3))
+
+        # resize from (201, 201) to (32, 32)
+        # mytransform = Resize(32)
+        # resized_images = np.zeros((n, 32, 32, 3))
+        # for i in range(n):
+        #     resized_images[i] = np.asarray(mytransform(Image.fromarray(all_images[i], 'RGB')))
+
         all_features = np.concatenate(all_features, axis=0)
         all_targets = np.concatenate(all_targets, axis=0)
         all_task_ids = np.concatenate(all_task_ids, axis=0)
 
+        # all_images = torch.from_numpy(all_images[:, np.newaxis, :, :]).expand(-1, 3, -1, -1).type(torch.float)
+        # all_features = torch.from_numpy(all_features).type(torch.float)
+        # all_targets = torch.from_numpy(all_targets).type(torch.long)
+        # all_task_ids = torch.from_numpy(all_task_ids).type(torch.long)
+        
         n = all_images.shape[0]
+        image_path = f'{root_dir}/{phase}/images.pkl'
 
-        for i in range(n):
-            fig, ax = plt.subplots()
-            fig.set_size_inches(3.5, 3.5)
+        with open (image_path, "wb") as f:
+            for i in range(n):
+                pickle.dump(all_images[i], f)
+                # fig, ax = plt.subplots()
+                # fig.set_size_inches(3.5, 3.5)
 
-            ax.imshow(all_images[i], cmap=my_cmap)
-            ax.set_alpha(0.)
-            ax.set_xticks([])
-            ax.set_yticks([])
-            ax.set_axis_off()
-            plt.margins(0.)
+                # ax.imshow(all_images[i], cmap=my_cmap)
+                # ax.set_alpha(0.)
+                # ax.set_xticks([])
+                # ax.set_yticks([])
+                # ax.set_axis_off()
+                # plt.margins(0.)
 
-            fig.set_facecolor((0.85, 0.85, 0.85))
+                # fig.set_facecolor((0.85, 0.85, 0.85))
 
-            plt.savefig(f'{root_dir}/{phase}/images/img_{i}.png', facecolor=(0.85, 0.85, 0.85))
-            plt.close()
+
+                # plt.savefig(image_path, facecolor=(0.85, 0.85, 0.85))
+                # plt.close()
+
+        f.close()
 
         np.savetxt(f'{root_dir}/{phase}/features.csv', all_features, delimiter=',', fmt ='%.5f')
         np.savetxt(f'{root_dir}/{phase}/targets.csv', all_targets, delimiter=',', fmt ='%.0f')
